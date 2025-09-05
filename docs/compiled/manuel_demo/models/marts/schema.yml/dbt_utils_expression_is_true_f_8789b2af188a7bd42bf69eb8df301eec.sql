@@ -1,0 +1,10 @@
+
+
+
+
+select
+    1
+from `manuel-demo-1392926998`.`analytics_analytics`.`fct_cohort_retention_rates_daily`
+
+where not(retention_rate between 0 and 1)
+

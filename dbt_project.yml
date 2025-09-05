@@ -1,0 +1,46 @@
+# Project metadata
+name: "manuel_demo"
+version: "1.0.0"
+profile: "manuel_demo"     # match a profile in ~/.dbt/profiles.yml
+require-dbt-version: ">=1.10.0,<2.0.0"
+
+# Paths
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+# Clean output dirs
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# ---------------------------------------------------------------------------
+# Global sensible defaults (can be overridden per model in SQL)
+# ---------------------------------------------------------------------------
+models:
+  +persist_docs: {relation: true, columns: true}
+  +on_schema_change: "sync_all_columns"
+  +tags: ["project:manuel_demo"]
+
+  # Default materialization for the project (can be overridden in folders)
+  +materialized: view
+
+  manuel_demo:
+    staging:
+      +materialized: view          # staging = views
+      +tags: ["layer:staging"]
+    marts:
+      +materialized: table         # marts default to tables
+      +tags: ["layer:marts"]
+
+snapshots:
+  # Putting all snapshots in a dedicated dataset
+  +target_schema: snapshots
+  +tags: ["layer:snapshot"]
+  
+vars:
+  fct_active_lookback_days: 31 
+  test_lookback_days: 9000

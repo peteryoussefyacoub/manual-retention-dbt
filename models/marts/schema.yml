@@ -1,0 +1,338 @@
+version: 2
+
+models:
+
+  # ──────────────────────────────────────────────────────────────
+  # dim_customer_country
+  # ──────────────────────────────────────────────────────────────
+  - name: dim_customer_country
+    description: "{{ doc('dim_customer_country__overview') }}"
+    
+    columns:
+      - name: customer_id
+        description: Business key. One row per customer_id.
+        tests: [not_null, unique]
+
+      - name: customer_country
+        description: >
+            Alphabetically-first non-null country for the customer;
+            may be NULL if all source values are NULL.
+        tests:
+          - not_null    # keeping this test to capture missed values.
+
+  # ──────────────────────────────────────────────────────────────
+  # dim_acquisition_taxonomy
+  # ──────────────────────────────────────────────────────────────
+  - name: dim_acquisition_taxonomy
+    description: "{{ doc('dim_acquisition_taxonomy__overview') }}"
+    
+    columns:
+      - name: customer_id
+        description: Business key. One row per customer_id.
+        tests: [not_null, unique]
+
+      - name: taxonomy_business_category_group
+        description: Deterministic taxonomy label for acquisition analysis.
+        tests: []   # Keep nullable if some customers have no order/taxonomy
+
+  # ──────────────────────────────────────────────────────────────
+  # dim_customer_cohort
+  # ──────────────────────────────────────────────────────────────
+  - name: dim_customer_cohort
+    description: "{{ doc('dim_customer_cohort__overview') }}"
+    
+    columns:
+      - name: customer_id
+        description: Business key. One row per customer_id.
+        tests: [not_null, unique]
+
+      - name: cohort_date
+        description: First-ever active date for the customer.
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "<=DATE({{ current_date_sql() }})"
+
+      - name: cohort_month
+        description: Month bucket of the cohort date.
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "= DATE_TRUNC(cohort_date, MONTH)"
+
+      - name: customer_country
+        description: Country at cohort time (carried from dim if available).
+        tests: [not_null]
+
+      - name: taxonomy_business_category_group
+        description: Acquisition taxonomy at cohort time (deterministic choice).
+        tests: []   # Keep nullable if some customers have no order/taxonomy
+
+  # =======================================================================================
+  # fct_customer_active_daily  (partition: activity_date)
+  # =======================================================================================
+  - name: fct_customer_active_daily 
+    description: "{{ doc('fct_customer_active_daily__overview') }}"
+  
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              [customer_id, activity_date]
+    columns:
+      - name: customer_id
+        tests:
+          - not_null:
+              arguments:
+          - relationships:
+              arguments:
+                to: ref('dim_customer_country')
+                field: customer_id
+          # Below test is currently giving error due to missing taxonomy groups per customer.      
+          #- relationships:
+          #    arguments:
+          #      to: ref('dim_acquisition_taxonomy')
+          #      field: customer_id
+
+      - name: activity_date
+        tests:
+          - not_null:
+              arguments:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "<= DATE({{ current_date_sql() }})"
+
+      - name: is_active
+        description: Always 1 because rows exist only for active subscription-days.
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "= 1"
+
+      - name: customer_country
+        tests:
+          - not_null:
+              arguments:
+
+      - name: taxonomy_business_category_group
+        tests: []   # may be null if mapping missing
+
+      - name: created_at
+        tests:
+          - not_null:
+              arguments:
+
+      - name: last_updated_at
+        tests:
+          - not_null:
+              arguments:
+
+  # =======================================================================================
+  # fct_customer_active_monthly  (partition: month_start)
+  # =======================================================================================
+  - name: fct_customer_active_monthly
+    description: "{{ doc('fct_customer_active_monthly__overview') }}"
+    
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [customer_id, month_start]
+    columns:
+      - name: month_start
+        tests:
+          - not_null:
+              arguments:
+
+      - name: customer_id
+        tests:
+          - not_null:
+              arguments:
+          - relationships:
+              arguments:
+                to: ref('dim_customer_country')
+                field: customer_id
+          # Enable if taxonomy coverage is complete:
+          # - relationships:
+          #     arguments:
+          #       to: ref('dim_acquisition_taxonomy')
+          #       field: customer_id
+
+      - name: active_days
+        description: Sum of daily is_active within the calendar month (0..31).
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "between 0 and 31"
+
+      - name: is_active_month
+        description: 1 if any day in the month is active, else 0.
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "= 1"
+
+      - name: customer_country
+        tests: []   # keep nullable if mapping can be missing
+
+      - name: taxonomy_business_category_group
+        tests: []   # keep nullable if mapping can be missing
+
+      - name: created_at
+        tests:
+          - not_null:
+              arguments:
+
+      - name: last_updated_at
+        tests:
+          - not_null:
+              arguments:
+
+  # =======================================================================================
+  # fct_cohort_retention_daily  (partition: cohort_date)
+  # =======================================================================================
+  - name: fct_cohort_retention_daily
+    description: "{{ doc('fct_cohort_retention_daily__overview') }}"
+    
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [cohort_date, days_since_cohort, customer_country, taxonomy_business_category_group]
+    columns:
+      - name: cohort_date
+        tests:
+          - not_null:
+              arguments:
+
+      - name: days_since_cohort
+        tests:
+          - not_null:
+              arguments:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
+      - name: customer_country
+        tests: []   # may be NULL if cohort rows have no country
+
+      - name: taxonomy_business_category_group
+        tests: []   # may be NULL if cohort rows have no taxonomy
+
+      - name: cohort_size
+        tests:
+          - not_null:
+              arguments:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
+      - name: active_customers
+        tests:
+          - not_null:
+              arguments:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "between 0 and cohort_size"
+
+  # =======================================================================================
+  # fct_cohort_retention_monthly  (partition: cohort_month)
+  # =======================================================================================
+  - name: fct_cohort_retention_monthly
+    description: "{{ doc('fct_cohort_retention_monthly__overview') }}"
+    
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [cohort_month, months_since_cohort, customer_country, taxonomy_business_category_group]
+    columns:
+      - name: cohort_month
+        tests:
+          - not_null:
+              arguments:
+
+      - name: months_since_cohort
+        tests:
+          - not_null:
+              arguments:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
+      - name: customer_country
+        tests: []   # keep nullable if cohort slice can be missing attributes
+
+      - name: taxonomy_business_category_group
+        tests: []   # keep nullable if cohort slice can be missing attributes
+
+      - name: cohort_size
+        description: Per-slice cohort size from dim_customer_cohort (non-null after inner join).
+        tests:
+          - not_null:
+              arguments:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
+      - name: active_customers
+        tests:
+          - not_null:
+              arguments:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "between 0 and cohort_size"
+                
+  # =======================================================================================
+  # fct_customer_base_updates_monthly
+  # =======================================================================================
+  - name: fct_customer_base_updates_monthly
+    description: "{{ doc('fct_customer_base_updates_monthly__overview') }}"
+    
+    tests:
+      # Exactly one row per month
+      - unique:
+          arguments:
+            column_name: month
+            where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"
+    columns:
+      - name: month
+        description: First day of the calendar month.
+        tests:
+          - not_null:
+              arguments:
+                where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "<= DATE_TRUNC(CURRENT_DATE(), MONTH)"
+                where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"
+
+      - name: new_customers
+        description: Distinct customers whose cohort_month equals month.
+        tests:
+          - not_null:
+              arguments:
+                where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+                where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"
+
+      - name: retained_customers
+        description: Customers whose last_activity_month equals month.
+        tests:
+          - not_null:
+              arguments:
+                where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+                where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"
+
+      # Cross-field consistency: churned should be a subset of active that month
+      - name: churned_customers
+        description: Churned customers cannot exceed total active customers (new + existing).
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: " <= new_customers + retained_customers"
+                where: "month >= DATE_SUB(CURRENT_DATE(), INTERVAL {{ var('test_lookback_days') }} DAY)"

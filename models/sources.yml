@@ -1,0 +1,51 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Landing dataset for source files (Parquet) loaded into BigQuery. Tables here
+      are used only as inputs to the staging layer; no business logic applied.
+    database: manuel-demo-1392926998      # GCP project id
+    schema: raw                           # BigQuery dataset name (EU region)
+    tags: ["layer:source"]
+
+    # Adding ingestion timestamp column
+    freshness:
+      warn_after: {count: 24, period: hour}
+      error_after: {count: 48, period: hour}
+
+    tables:
+      - name: customers
+        description: >
+          Raw customer records. Expected 1 row per customer_id.
+        loaded_at_field: ingested_at   # <-- add this column in raw to enable freshness
+        columns:
+          - name: customer_id
+            description: "Natural key of the customer."
+          - name: customer_country
+            description: "Country name as provided by the source (not ISO-coded)."
+
+      - name: acq_orders
+        description: >
+          Raw acquisition/taxonomy mapping for customers. Contains one row per customer
+        loaded_at_field: ingested_at
+        columns:
+          - name: customer_id
+            description: "Customer key to join back to customers."
+          - name: taxonomy_business_category_group
+            description: "High-level acquisition business taxonomy/category label from source."
+
+      - name: activity
+        description: >
+          Raw activity/subscription windows. Column names are renamed in staging:
+          from_date → start_date, to_date → end_date.
+        loaded_at_field: ingested_at
+        columns:
+          - name: customer_id
+            description: "Customer key."
+          - name: subscription_id
+            description: "Subscription/contract identifier."
+          - name: from_date
+            description: "Start (inclusive) of the raw window (renamed in staging)."
+          - name: to_date
+            description: "End (inclusive) of the raw window (renamed in staging)."

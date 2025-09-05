@@ -1,0 +1,23 @@
+version: 2
+
+exposures:
+  - name: retention_dashboard
+    type: dashboard
+    maturity: high
+    url: https://lookerstudio.google.com/your-dashboard-link
+    description: >
+      Cohort retention (daily & monthly), monthly base movements (new/retained/churned),
+      and monthly actives; sliced by country & taxonomy.
+    depends_on:
+      - ref('fct_cohort_retention_daily')
+      - ref('fct_cohort_retention_monthly')
+      - ref('fct_customer_active_daily')
+      - ref('fct_customer_active_monthly')
+      - ref('fct_customer_base_updates_monthly')
+      - ref('dim_customer_cohort')
+      - ref('dim_customer_country')
+      - ref('dim_acquisition_taxonomy')
+    owner:
+      name: Peter Yacoub
+      email: peteryoussefyacoub@.com
+    tags: ['bi','dashboard','retention']

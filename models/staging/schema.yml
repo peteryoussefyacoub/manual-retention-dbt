@@ -1,0 +1,115 @@
+version: 2
+
+models:
+  # ──────────────────────────────────────────────────────────────
+  # stg_customers: one row per customer
+  # Grain: 1 row per customer_id
+  # Source: raw.customers
+  # Purpose: provide a clean, typed customer dimension used by joins
+  # ──────────────────────────────────────────────────────────────
+  - name: stg_customers
+    description: >
+      Cleaned customer dimension derived from raw.customers. One row per customer.
+      Column names are standardized and types are enforced for downstream modeling.
+      Grain: customer_id.
+    columns:
+      - name: customer_id
+        description: >
+          Unique id for the customer.
+          Used as the primary join key to other staging/mart models.
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_country
+        description: >
+          Customer country name from the source. Standardized (trimmed/uppercased) in staging.
+          Not mapped to ISO-2/ISO-3 country codes.
+        tests:
+          - not_null
+
+  # ──────────────────────────────────────────────────────────────
+  # stg_acq_orders: acquisition taxonomy per customer
+  # Grain: typically 0..1 rows per customer_id (could be 1..N?, TBC)
+  # Source: raw.acq_orders
+  # Purpose: attach high-level acquisition/business taxonomy to customers
+  # ──────────────────────────────────────────────────────────────
+  - name: stg_acq_orders
+    description: >
+      Acquisition / taxonomy attributes per customer derived from raw.acq_orders.
+      Intended as a descriptive dimension joined to customers. TBC if a customer can be
+      mapped to multiple acquisition/business taxonomy. 
+    columns:
+      - name: customer_id
+        description: >
+          Customer key used to join to stg_customers and fact models.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+
+      - name: taxonomy_business_category_group
+        description: >
+          High-level business category/taxonomy for the customer as provided by the source.
+          Containes "Other Group" category, TBC what it contains and how the categories are
+          updated.
+        tests:
+          - not_null
+
+  # ──────────────────────────────────────────────────────────────
+  # stg_activity: one row per raw activity/subscription window
+  # Grain: customer_id + subscription_id + start_date (per source window)
+  # Source: raw.activity (from_date → start_date, to_date → end_date)
+  # Purpose: standardize window boundaries and keys for downstream activity facts
+  # ──────────────────────────────────────────────────────────────
+  - name: stg_activity
+    description: >
+      Cleaned activity/subscription windows derived from raw.activity.
+      Renames from_date → start_date and to_date → end_date, and enforces types.
+      Grain: one row per (customer_id, subscription_id, start_date) window, TBC.
+      I assumed the end_date is related to the activity, not the subscription;hence,
+      it should not include any nulls. This is also consistent with the data, TBC.
+      TBC if a customer can have multiple active subscriptions at the same time.
+    columns:
+      # Keys & referential integrity
+      - name: customer_id
+        description: >
+          Customer key for the activity window. Must exist in stg_customers.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+
+      - name: subscription_id
+        description: >
+          Identifier of the subscription/contract associated with the window.
+          Used to distinguish multiple concurrent subscriptions for the same customer.
+        tests:
+          - not_null
+
+      # Dates
+      - name: start_date
+        description: >
+          Start (inclusive) of the activity/subscription window. Renamed from raw.activity.from_date.
+          Expected to be on or before CURRENT_DATE(), TBC.
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                # Column-level predicate: renders as "start_date <= CURRENT_DATE()"
+                expression: "<= CURRENT_DATE()"
+
+      - name: end_date
+        description: >
+          End (inclusive) of the activity/subscription window. Renamed from raw.activity.to_date.
+          This seems to be the end date of the activity, not the subscription, based on the name
+          of the table;hence, it should not include any nulls.
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= start_date"

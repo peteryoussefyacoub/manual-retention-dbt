@@ -1,0 +1,7 @@
+selectors:
+  - name: changed_marts
+    definition:
+      method: state
+      value: modified
+      children: true     # build downstream dependents too
+      parents: true      # and required parents
